@@ -348,10 +348,10 @@
   [document account community]
   (tb/transform-when-key-exists document
     {:body (fn [body]
-             (-> (stache/render body {:name  (account/first-name account)})
+             (-> (stache/render body {:name (account/first-name account)})
                  (md/md-to-html-string)))
      :subject (fn [subject]
-                (->(stache/render subject {:community-name (property/name community)
+                (-> (stache/render subject {:community-name (property/name community)
                                            :name (account/first-name account)})))}))
 
 
