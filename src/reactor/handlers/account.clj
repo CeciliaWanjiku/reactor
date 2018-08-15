@@ -16,6 +16,7 @@
             [hubspot.contact :as contact]
             [mailer.core :as mailer]
             [mailer.message :as mm]
+            [markdown.core :as md]
             [reactor.dispatch :as dispatch]
             [reactor.handlers.common :refer :all]
             [reactor.services.slack :as slack]
@@ -30,7 +31,8 @@
             [teller.customer :as tcustomer]
             [teller.property :as tproperty]
             [reactor.utils.tipe :as tipe]
-            [reactor.config :as config]))
+            [reactor.config :as config]
+            [clostache.parser :as stache]))
 
 ;; =============================================================================
 ;; Helpers
@@ -334,68 +336,36 @@
 
 
 ;; ==============================================================================
-;; playground ===================================================================
-;; ==============================================================================
-
-
-(defmethod dispatch/notify ::send-slack-notification
-  [deps event {account-id :account-id}]
-  (let [account (d/entity (->db deps) account-id)]
-    (slack/send
-     (->slack deps)
-     {:uuid    (event/uuid event)
-      :channel slack/crm}
-     (sm/msg
-      (sm/info
-       (sm/text
-        (format "Changed %s's first name to Cece!" (account/email account))))))))
-
-
-(defmethod dispatch/job ::change-first-name-to-cece
-  [deps event {account-id :account-id :as params}]
-  (let [account (d/entity (->db deps) account-id)]
-    (assert (not= (account/first-name account) "Cece")
-            "Name is already Cece!")
-    [[:db/add account-id :account/first-name "Cece"]
-     (event/notify ::send-slack-notification {:params       params
-                                              :triggered-by event})]))
-
-
-;; ==============================================================================
 ;; ceo welcome email ============================================================
 ;; ==============================================================================
-
-
-;; - When should the message go out?
-;;   - one day after move-in
-;;   - TODO: How do we tell when someone moved in?
-;; - TODO: Name and email of person that moved in
-;; - DONE: need email copy
-;; - DONE: Should be sent from jon@starcity.com
 
 
 (def ^:private ceo-welcome-email-document-id
   "5b439a6bc7e97000137f4897")
 
 
-;; (defn prepare-renewal-email
-;;   [document account license]
-;;   (tb/transform-when-key-exists document
-;;     {:body (fn [body]
-;;              (-> (stache/render body {:name   (account/first-name account)
-;;                                       :ends   (date/short (member-license/ends license))
-;;                                       :sender "Starcity Community"})
-;;                  (md/md-to-html-string)))}))
+(defn format-ceo-email
+  [document account community]
+  (tb/transform-when-key-exists document
+    {:body (fn [body]
+             (-> (stache/render body {:name  (account/first-name account)})
+                 (md/md-to-html-string)))
+     :subject (fn [subject]
+                (->(stache/render subject {:community-name (property/name community)
+                                           :name (account/first-name account)})))}))
 
 
 (defmethod dispatch/notify ::send-ceo-welcome-email
   [deps event {:keys [account-id] :as params}]
-  (let [content (tipe/fetch-document (->tipe deps) ceo-welcome-email-document-id)]
+  (let [document  (tipe/fetch-document (->tipe deps) ceo-welcome-email-document-id)
+        account   (d/entity (->db deps) account-id)
+        community (account/current-property (->db deps) account)
+        content   (format-ceo-email document account community)]
     (mailer/send
      (->mailer deps)
-     "todo@todo.com"
+     (account/email account)
      (mail/subject (:subject content))
-     (mm/msg (:body content) (:signature content))
+     (mm/msg (:body content) (:signature content)(:signatureEmail content))
      {:uuid (event/uuid event)
       :from (:from content)})))
 
@@ -430,16 +400,23 @@
   (= 1 (count (:account/licenses (member-license/account member-license)))))
 
 
-(defn- license->welcome-email-event [member-license]
+(defn- license->welcome-email-event [event member-license]
+  (let [account (member-license/account member-license)]
+    (event/notify ::send-ceo-welcome-email {:params       {:account-id (td/id account)}
+                                            :triggered-by event})))
+(comment
+
+  (d/transact conn [(event/job :account/send-welcome-emails {:params {:t #inst "2018-08-14T09:57:00"}})])
+
   )
 
-
-(defmethod dispatch/job :account/send-welcome-emails
+(defmethod dispatch/job :account/send-welcome-emails 
   [deps event {t :t}]
   (->> (all-active-licenses (->db deps))
        (filter #(and (commenced-yesterday? % t)
                      (only-one-license? %)))
-       (map license->welcome-email-event)))
+       (map (fn [license]
+              (license->welcome-email-event event license)))))
 
 
 (comment
@@ -448,39 +425,19 @@
     (def conn reactor.datomic/conn))
 
 
-  (let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
-    (d/touch (member-license/active (d/db conn) account)))
+  
 
 
   (let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
-    (d/transact conn [(event/job ::send-ceo-welcome-email
-                                 {:params {:account-id (td/id account)}})]))
-
-
-#_(defmethod dispatch/notify ::send-renewal-reminder
-    [deps event {:keys [license-id days]}]
-    (let [license     (d/entity (->db deps) license-id)
-          account     (member-license/account license)
-          document-id (get-renewal-reminder-email-document-id license)
-          document    (tipe/fetch-document (->tipe deps) document-id)
-          content     (prepare-renewal-email document account license)]
-    (mailer/send
-     (->mailer deps)
-     (account/email account)
-     (mail/subject (:subject content))
-     (mm/msg (:body content) (or (:signature content) (mail/noreply-sig)))
-     {:uuid (event/uuid event)
-      :from (or (:from content) (mail/from-community))
-      :bcc  (when (config/production? config) mail/community-address)})))
-
-
+    (d/transact conn [(event/notify ::send-ceo-welcome-email
+                                    {:params {:account-id (td/id account)}})]))
 
   ;; TOPIC: job, report, notify
   ;; - job: could do anything
   ;; - notify: sending emails to members
   ;; - report: sending slack messages to us
 
-(let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
+  (let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
     (d/transact conn [(event/job ::change-first-name-to-cece
                                  {:params {:account-id (td/id account)}})]))
 

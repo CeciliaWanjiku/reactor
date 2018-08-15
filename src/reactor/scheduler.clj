@@ -55,7 +55,8 @@
 
        :daily-events
        {:handler  (fn [t {conn :conn}]
-                    (d/transact-async conn [(events/process-daily-tasks t)]))
+                    (d/transact-async conn [(events/process-daily-tasks t)
+                                            (event/job :account/send-welcome-emails {:params {:t t}})]))
         :params   params
         ;; 9am every day
         :schedule "0 0 9 * * * *"}}
