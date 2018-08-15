@@ -365,7 +365,7 @@
      (->mailer deps)
      (account/email account)
      (mail/subject (:subject content))
-     (mm/msg (:body content) (:signature content)(:signatureEmail content))
+     (mm/msg (:body content) (:signature content))
      {:uuid (event/uuid event)
       :from (:from content)})))
 
@@ -404,47 +404,11 @@
   (let [account (member-license/account member-license)]
     (event/notify ::send-ceo-welcome-email {:params       {:account-id (td/id account)}
                                             :triggered-by event})))
-(comment
 
-  (d/transact conn [(event/job :account/send-welcome-emails {:params {:t #inst "2018-08-14T09:57:00"}})])
 
-  )
-
-(defmethod dispatch/job :account/send-welcome-emails 
+(defmethod dispatch/job :account/send-welcome-emails
   [deps event {t :t}]
   (->> (all-active-licenses (->db deps))
        (filter #(and (commenced-yesterday? % t)
                      (only-one-license? %)))
-       (map (fn [license]
-              (license->welcome-email-event event license)))))
-
-
-(comment
-
-  (do
-    (def conn reactor.datomic/conn))
-
-
-  
-
-
-  (let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
-    (d/transact conn [(event/notify ::send-ceo-welcome-email
-                                    {:params {:account-id (td/id account)}})]))
-
-  ;; TOPIC: job, report, notify
-  ;; - job: could do anything
-  ;; - notify: sending emails to members
-  ;; - report: sending slack messages to us
-
-  (let [account (d/entity (d/db conn) [:account/email "member@test.com"])]
-    (d/transact conn [(event/job ::change-first-name-to-cece
-                                 {:params {:account-id (td/id account)}})]))
-
-  (d/transact conn [[:db/add [:account/email "member@test.com"] :account/first-name "Ethan"]])
-
-
-  (d/transact conn [{:db/id        285873023223289
-                     :event/status :event.status/pending}])
-
-  )
+       (map (partial license->welcome-email-event event))))
