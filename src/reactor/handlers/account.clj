@@ -140,7 +140,8 @@
       (let [now (date/tz-uncorrected (java.util.Date.)
                                      (t/time-zone-for-id "America/Los_Angeles"))]
         (contact/update! (:canonical-vid contact)
-                         {:closedate (.getTime now)})))))
+                         {:closedate (.getTime now)
+                          :location "56 Mason"})))))
 
 
 ;; helping hands order summary =================================================
@@ -258,6 +259,11 @@
                   {:params params :triggered-by event})
        (event/job ::set-hubspot-close-date
                   {:params params :triggered-by event})])))
+
+
+(comment
+  285873023223145
+ )
 
 
 ;; =============================================================================
