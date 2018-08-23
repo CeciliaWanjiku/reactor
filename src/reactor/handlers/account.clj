@@ -350,6 +350,7 @@
     {:body    (fn [body]
                 (-> (stache/render body {:name (account/first-name account)})
                     (md/md-to-html-string)))
+
      :subject (fn [subject]
                 (-> (stache/render subject {:community-name (property/name community)
                                             :name           (account/first-name account)})))}))
