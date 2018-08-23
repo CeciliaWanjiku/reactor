@@ -141,7 +141,7 @@
                                      (t/time-zone-for-id "America/Los_Angeles"))]
         (contact/update! (:canonical-vid contact)
                          {:closedate (.getTime now)
-                          :location "56 Mason"})))))
+                          :location (property/code (account/current-property (->db deps) account))})))))
 
 
 ;; helping hands order summary =================================================
